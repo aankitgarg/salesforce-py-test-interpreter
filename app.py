@@ -16,3 +16,10 @@ def run_code():
         return jsonify({"result": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@app.route("/")
+def home():
+    return "Hello! The app is running. Use the /run endpoint to POST your code."
+
+if __name__ == "__main__":
+    app.run()
