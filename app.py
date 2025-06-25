@@ -25,4 +25,4 @@ def run_code():
 
 @app.route("/")
 def home():
-    return "Hello! The app is running. Use the /run endpoint to POST your
+    return "Hello! The app is running. Use the /run endpoint to POST your code."
