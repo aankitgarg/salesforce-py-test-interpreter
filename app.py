@@ -1,28 +1,52 @@
 from flask import Flask, request, jsonify
 import io
 import contextlib
+import traceback
 
 app = Flask(__name__)
 
-@app.route("/run", methods=["GET", "POST"])
+@app.route('/run', methods=['POST'])
 def run_code():
-    if request.method == "POST":
-        code = request.json.get("code", "")
-        output = io.StringIO()
-        try:
-            with contextlib.redirect_stdout(output):
-                exec(code, {})
-            result = output.getvalue()
-            return jsonify({"result": result})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 400
-    else:
-        # GET request to /run
-        return (
-            "Please send a POST request with JSON body containing 'code' to execute.",
-            200,
-        )
+    code = request.json.get("code", "")
 
-@app.route("/")
-def home():
-    return "Hello! The app is running. Use the /run endpoint to POST your code."
+    local_vars = {}
+    output_stream = io.StringIO()
+
+    try:
+        with contextlib.redirect_stdout(output_stream):
+            try:
+                # Try to evaluate simple one-liners like "6+6"
+                result = eval(code, {}, local_vars)
+                if result is not None:
+                    print(result)
+            except SyntaxError:
+                # Run full code block
+                exec(code, {}, local_vars)
+
+                # Safely evaluate final line, if not a print or assignment
+                lines = code.strip().splitlines()
+                last_line = lines[-1].strip() if lines else ""
+
+                if last_line and not last_line.startswith("print") and "=" not in last_line:
+                    try:
+                        result = eval(last_line, {}, local_vars)
+                        if result is not None:
+                            print(result)
+                    except:
+                        pass
+            except Exception as e:
+                print(f"Error during eval: {str(e)}")
+
+        output = output_stream.getvalue().strip()
+        return jsonify({"result": output})
+
+    except Exception as e:
+        return jsonify({
+            "error": "Interpreter exception",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }), 400
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
