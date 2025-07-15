@@ -16,39 +16,54 @@ def run_code():
     output_stream = io.StringIO()
 
     logging.debug("Received code.")
-    logging.debug(f"Code snippet:\n{code[:500]}...")  # Log beginning of code
+    logging.debug(f"Code snippet:\n{code[:500]}...")
 
     try:
         with contextlib.redirect_stdout(output_stream):
             try:
                 stripped_code = code.strip()
 
-                # Case 1: Single-line expression (like "6 + 6")
-                if '\n' not in stripped_code and '=' not in stripped_code and not stripped_code.startswith('print'):
-                    result = eval(stripped_code, {}, local_vars)
-                    if result is not None:
-                        print(result)
+                # ✅ Case 1: Only try eval() if it's a simple, single expression
+                try:
+                    if (
+                        '\n' not in stripped_code and
+                        not any(stripped_code.startswith(w) for w in ('import', 'def', 'for', 'if', 'while', 'class', 'with')) and
+                        '=' not in stripped_code
+                    ):
+                        result = eval(stripped_code, {}, local_vars)
+                        if result is not None:
+                            print(result)
+                    else:
+                        # ✅ Case 2: Multi-line or non-evaluable: use exec()
+                        exec(stripped_code, {}, local_vars)
 
-                # Case 2: Multi-line code
-                else:
-                    exec(stripped_code, {}, local_vars)
-                    lines = [line.strip() for line in stripped_code.splitlines() if line.strip()]
-                    last_line = lines[-1] if lines else ""
+                        # Attempt to evaluate last line if it's an expression
+                        lines = [line.strip() for line in stripped_code.splitlines() if line.strip()]
+                        last_line = lines[-1] if lines else ""
 
-                    if last_line and not last_line.startswith("print") and "=" not in last_line:
-                        try:
-                            result = eval(last_line, {}, local_vars)
-                            if result is not None:
-                                print(result)
-                        except Exception as eval_error:
-                            logging.debug(f"Could not evaluate last line: {eval_error}")
+                        if (
+                            last_line and
+                            not last_line.startswith("print") and
+                            "=" not in last_line and
+                            not any(last_line.startswith(w) for w in ('import', 'def', 'for', 'if', 'while', 'class', 'with'))
+                        ):
+                            try:
+                                result = eval(last_line, {}, local_vars)
+                                if result is not None:
+                                    print(result)
+                            except Exception as eval_error:
+                                logging.debug(f"Could not evaluate last line: {eval_error}")
+
+                except Exception as inner_eval_error:
+                    logging.debug(f"Top-level eval fallback failed: {inner_eval_error}")
+                    raise
 
             except Exception as exec_error:
                 logging.error(f"Execution error: {exec_error}")
                 raise
 
         output = output_stream.getvalue().strip()
-        logging.debug(f"Execution output:\n{output[:500]}")  # Log output start
+        logging.debug(f"Execution output:\n{output[:500]}")
         return jsonify({"result": output})
 
     except Exception as e:
