@@ -1,64 +1,53 @@
 from flask import Flask, request, jsonify
-import sys
 import io
+import contextlib
 import traceback
-import builtins
-import json
-import pandas as pd
+import logging
 
 app = Flask(__name__)
 
-@app.route("/", methods=["POST"])
+# Enable logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
+
+@app.route('/run', methods=['POST'])
 def run_code():
     code = request.json.get("code", "")
     local_vars = {}
+    output_stream = io.StringIO()
 
-    # Setup safe execution environment
-    safe_globals = {
-        "__builtins__": builtins.__dict__,
-        "json": json,
-        "pd": pd
-    }
-
-    # Capture printed output
-    original_stdout = sys.stdout
-    sys.stdout = io.StringIO()
+    logging.debug("Received code.")
+    logging.debug(f"Code snippet:\n{code[:500]}...")  # Log beginning of code
 
     try:
-        # Split into lines
-        lines = code.strip().split("\n")
-        if lines:
-            *exec_lines, last_line = lines
-            exec_code = "\n".join(exec_lines)
-
-            # First run all but last line (if any)
-            if exec_code.strip():
-                exec(exec_code, safe_globals, local_vars)
-
-            # Try to evaluate the last line
+        with contextlib.redirect_stdout(output_stream):
             try:
-                result = eval(last_line, safe_globals, local_vars)
-                if result is not None:
-                    print(result)
-            except Exception:
-                exec(last_line, safe_globals, local_vars)
-        else:
-            exec(code, safe_globals, local_vars)
+                exec(code, {}, local_vars)
+                lines = [line.strip() for line in code.strip().splitlines() if line.strip()]
+                last_line = lines[-1] if lines else ""
 
-        # Return captured output
-        output = sys.stdout.getvalue()
-        return jsonify({"output": output})
+                if last_line and not last_line.startswith("print") and "=" not in last_line:
+                    try:
+                        result = eval(last_line, {}, local_vars)
+                        if result is not None:
+                            print(result)
+                    except Exception as eval_error:
+                        logging.debug(f"Could not evaluate last line: {eval_error}")
+            except Exception as exec_error:
+                logging.error(f"Execution error: {exec_error}")
+                raise
+
+        output = output_stream.getvalue().strip()
+        logging.debug(f"Execution output:\n{output[:500]}")  # Log output start
+        return jsonify({"result": output})
 
     except Exception as e:
-        tb = traceback.format_exc()
-        return jsonify({
+        error_details = {
             "error": "Interpreter exception",
             "message": str(e),
-            "traceback": tb
-        }), 500
+            "traceback": traceback.format_exc()
+        }
+        logging.error(f"Unhandled exception:\n{traceback.format_exc()}")
+        return jsonify(error_details), 500
 
-    finally:
-        sys.stdout = original_stdout
-
-if __name__ == "__main__":
-    app.run(debug=True)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
