@@ -6,6 +6,7 @@ import logging
 
 app = Flask(__name__)
 
+# Setup logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s')
 
 @app.route('/run', methods=['POST'])
@@ -14,51 +15,31 @@ def run_code():
     local_vars = {}
     output_stream = io.StringIO()
 
-    logging.debug("Received code:")
-    logging.debug(code[:500] + '...')  # Limit log output for large code blocks
+    logging.debug("Received code snippet:")
+    logging.debug(code[:500] + '...')
 
     try:
         with contextlib.redirect_stdout(output_stream):
             stripped_code = code.strip()
 
-            # Determine if it's a simple expression or complex code
-            is_single_expression = (
-                '\n' not in stripped_code and
-                not stripped_code.startswith(('import', 'def', 'for', 'if', 'while', 'class', 'with')) and
-                '=' not in stripped_code
-            )
+            # ✅ Always use exec for multi-line or complex code
+            exec(stripped_code, {}, local_vars)
 
-            try:
-                if is_single_expression:
-                    # ✅ Safe to eval simple expressions like "6 + 6"
-                    result = eval(stripped_code, {}, local_vars)
+            # Optionally: try to evaluate and print last expression
+            lines = [line.strip() for line in stripped_code.splitlines() if line.strip()]
+            last_line = lines[-1] if lines else ""
+
+            if (
+                last_line and
+                not last_line.startswith(('import', 'def', 'for', 'if', 'while', 'class', 'with', 'print')) and
+                '=' not in last_line
+            ):
+                try:
+                    result = eval(last_line, {}, local_vars)
                     if result is not None:
                         print(result)
-                else:
-                    # ✅ For everything else (multi-line, import, def, etc.)
-                    exec(stripped_code, {}, local_vars)
-
-                    # Try to eval the last line if it's an expression
-                    lines = [line.strip() for line in stripped_code.splitlines() if line.strip()]
-                    last_line = lines[-1] if lines else ""
-
-                    is_last_line_expression = (
-                        last_line and
-                        not last_line.startswith("print") and
-                        not last_line.startswith(('import', 'def', 'for', 'if', 'while', 'class', 'with')) and
-                        '=' not in last_line
-                    )
-
-                    if is_last_line_expression:
-                        try:
-                            result = eval(last_line, {}, local_vars)
-                            if result is not None:
-                                print(result)
-                        except Exception as eval_error:
-                            logging.debug(f"Could not evaluate last line: {eval_error}")
-            except Exception as exec_error:
-                logging.error(f"Execution error: {exec_error}")
-                raise
+                except Exception as eval_error:
+                    logging.debug(f"Skipped eval on last line: {eval_error}")
 
         output = output_stream.getvalue().strip()
         logging.debug("Execution output:")
@@ -66,7 +47,7 @@ def run_code():
         return jsonify({"result": output})
 
     except Exception as e:
-        logging.error("Unhandled exception:")
+        logging.error("Execution failed:")
         logging.error(traceback.format_exc())
         return jsonify({
             "error": "Interpreter exception",
